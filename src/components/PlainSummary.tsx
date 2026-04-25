@@ -17,7 +17,7 @@ export function PlainSummary({
     <div className="space-y-6">
       <div className="space-y-3">
         {summary.split("\n").filter(Boolean).map((para, i) => (
-          <p key={i} className="text-sm leading-relaxed text-foreground/80">
+          <p key={i} className="break-words text-sm leading-relaxed text-foreground/80">
             {para}
           </p>
         ))}
@@ -36,7 +36,7 @@ export function PlainSummary({
                   weight="fill"
                   className="mt-0.5 shrink-0 text-warm"
                 />
-                <span className="text-sm text-foreground/80">{obligation}</span>
+                <span className="break-words text-sm text-foreground/80">{obligation}</span>
               </li>
             ))}
           </ul>
