@@ -1,0 +1,1 @@
+const i="en",n=[{value:"en",label:"English"},{value:"hi",label:"Hindi"},{value:"mr",label:"Marathi"}],a={en:"en-US",hi:"hi-IN",mr:"mr-IN"};function r(e){return e<=30?"Likely credible":e<=60?"Needs verification":e<=80?"Likely misleading":"High fake-news risk"}function l(e){return`analysis_${e}`}export{i as D,n as L,a as S,r as a,l as g};

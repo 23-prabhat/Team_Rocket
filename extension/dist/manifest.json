@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Veritron",
+  "version": "0.1.0",
+  "description": "Detect misleading content, explain why it was flagged, and translate the result.",
+  "action": {
+    "default_title": "Veritron",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://localhost/*",
+    "https://127.0.0.1/*"
+  ],
+  "permissions": ["activeTab", "storage", "scripting"],
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
