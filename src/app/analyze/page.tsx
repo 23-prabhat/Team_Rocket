@@ -57,6 +57,10 @@ type ChatMessage = {
   content: string;
 };
 
+type AnalysisSessionCache = AnalysisSession & {
+  analysisByLanguage?: Record<string, Analysis>;
+};
+
 const CHAT_COPY = {
   en: {
     title: "Analysis Chatbot",
@@ -154,14 +158,21 @@ export default function AnalyzePage() {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const [session, setSession] = useState<AnalysisSession | null>(() => {
+  const [session, setSession] = useState<AnalysisSessionCache | null>(() => {
     if (typeof window === "undefined") return null;
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as AnalysisSession | Analysis;
-      if ("analysis" in parsed && "text" in parsed && "readingLevel" in parsed) return parsed;
-      return { analysis: parsed as Analysis, text: "", readingLevel: "simple" };
+      const parsed = JSON.parse(raw) as AnalysisSessionCache | Analysis;
+      const normalized: AnalysisSessionCache =
+        "analysis" in parsed && "text" in parsed && "readingLevel" in parsed
+          ? parsed
+          : { analysis: parsed as Analysis, text: "", readingLevel: "simple" };
+
+      if (!normalized.analysisByLanguage) {
+        normalized.analysisByLanguage = { [normalized.analysis.language]: normalized.analysis };
+      }
+      return normalized;
     } catch {
       return null;
     }
@@ -252,7 +263,19 @@ export default function AnalyzePage() {
 
   useEffect(() => {
     if (!session || !session.text || session.analysis.language === lang) return;
-    let cancelled = false;
+
+    const cached = session.analysisByLanguage?.[lang];
+    if (cached) {
+      const nextSession: AnalysisSessionCache = {
+        ...session,
+        analysis: cached,
+      };
+      setSession(nextSession);
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
+      return;
+    }
+
+    const controller = new AbortController();
 
     const refreshAnalysis = async () => {
       try {
@@ -264,10 +287,18 @@ export default function AnalyzePage() {
             language: lang,
             source: "web",
           }),
+          signal: controller.signal,
         });
         const nextAnalysis: Analysis = await response.json();
-        if (!response.ok || cancelled) return;
-        const nextSession: AnalysisSession = { ...session, analysis: nextAnalysis };
+        if (!response.ok || controller.signal.aborted) return;
+        const nextSession: AnalysisSessionCache = {
+          ...session,
+          analysis: nextAnalysis,
+          analysisByLanguage: {
+            ...(session.analysisByLanguage ?? {}),
+            [nextAnalysis.language]: nextAnalysis,
+          },
+        };
         setSession(nextSession);
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
       } catch {
@@ -277,7 +308,7 @@ export default function AnalyzePage() {
 
     void refreshAnalysis();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [lang, session]);
 

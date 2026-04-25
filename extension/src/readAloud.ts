@@ -3,6 +3,10 @@ import { SPEECH_LANGUAGE_MAP, type SupportedLanguage } from "./shared";
 export type SpeechStatus = "idle" | "playing" | "paused";
 
 let speechToken = 0;
+let cachedVoices: SpeechSynthesisVoice[] = [];
+let voicesReadyPromise: Promise<SpeechSynthesisVoice[]> | null = null;
+let voicesListenerAttached = false;
+const voiceByLanguage = new Map<SupportedLanguage, SpeechSynthesisVoice>();
 
 const LANGUAGE_FALLBACKS: Record<SupportedLanguage, string[]> = {
   en: ["en-US", "en-GB", "en"],
@@ -10,32 +14,62 @@ const LANGUAGE_FALLBACKS: Record<SupportedLanguage, string[]> = {
   mr: ["mr-IN", "mr", "hi-IN", "hi", "en-IN", "en-US"],
 };
 
-async function waitForVoices(timeoutMs = 1200): Promise<SpeechSynthesisVoice[]> {
+function refreshCachedVoices(): SpeechSynthesisVoice[] {
+  const synthesis = window.speechSynthesis;
+  if (!synthesis?.getVoices) return [];
+  const voices = synthesis.getVoices();
+  if (voices.length > 0) {
+    cachedVoices = voices;
+    voiceByLanguage.clear();
+  }
+  return voices;
+}
+
+function ensureVoicesListener() {
+  const synthesis = window.speechSynthesis;
+  if (!synthesis?.addEventListener || voicesListenerAttached) return;
+  voicesListenerAttached = true;
+  synthesis.addEventListener("voiceschanged", () => {
+    refreshCachedVoices();
+  });
+}
+
+async function waitForVoices(timeoutMs = 300): Promise<SpeechSynthesisVoice[]> {
   const synthesis = window.speechSynthesis;
   if (!synthesis?.getVoices) {
     return [];
   }
 
-  const initialVoices = synthesis.getVoices();
-  if (initialVoices.length > 0) {
-    return initialVoices;
+  if (cachedVoices.length > 0) {
+    return cachedVoices;
   }
 
-  return new Promise((resolve) => {
-    let settled = false;
+  const immediate = refreshCachedVoices();
+  if (immediate.length > 0) {
+    return immediate;
+  }
 
-    const finalize = () => {
-      if (settled) return;
-      settled = true;
-      synthesis.removeEventListener("voiceschanged", handleVoicesChanged);
-      resolve(synthesis.getVoices());
-    };
+  if (!voicesReadyPromise) {
+    voicesReadyPromise = new Promise((resolve) => {
+      let settled = false;
 
-    const handleVoicesChanged = () => finalize();
+      const finalize = () => {
+        if (settled) return;
+        settled = true;
+        synthesis.removeEventListener("voiceschanged", handleVoicesChanged);
+        const voices = refreshCachedVoices();
+        voicesReadyPromise = null;
+        resolve(voices);
+      };
 
-    synthesis.addEventListener("voiceschanged", handleVoicesChanged);
-    window.setTimeout(finalize, timeoutMs);
-  });
+      const handleVoicesChanged = () => finalize();
+
+      synthesis.addEventListener("voiceschanged", handleVoicesChanged);
+      window.setTimeout(finalize, timeoutMs);
+    });
+  }
+
+  return voicesReadyPromise;
 }
 
 function pickBestVoice(
@@ -138,10 +172,18 @@ export function speakText(text: string, language: SupportedLanguage, onEnd: () =
   const targetLang = SPEECH_LANGUAGE_MAP[language] ?? "en-US";
 
   void (async () => {
+    ensureVoicesListener();
     const voices = await waitForVoices();
     if (token !== speechToken) return;
 
-    const matchingVoice = pickBestVoice(voices, language);
+    const cachedVoice = voiceByLanguage.get(language);
+    const matchingVoice =
+      cachedVoice && voices.includes(cachedVoice)
+        ? cachedVoice
+        : pickBestVoice(voices, language);
+    if (matchingVoice) {
+      voiceByLanguage.set(language, matchingVoice);
+    }
     let index = 0;
 
     const speakNext = () => {
