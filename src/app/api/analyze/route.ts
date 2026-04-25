@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { analyze } from '@/lib/analyze'
 import type { AnalyzeRequest } from '@/lib/types'
 import { extractTextFromUrl } from '@/lib/url'
-import { assessSourceReliability, fetchCorroborationMatches } from '@/lib/source-signals'
+import { assessSourceReliability } from '@/lib/source-signals'
 
 export const runtime = 'nodejs'
 
@@ -20,9 +20,6 @@ export async function POST(request: NextRequest) {
       const targetUrl = rawUrl || rawText
       const extracted = await extractTextFromUrl(targetUrl)
       const sourceReliability = assessSourceReliability(extracted.finalUrl)
-      const corroborationMatches = await fetchCorroborationMatches(
-        extracted.title || extracted.description || extracted.text.slice(0, 220)
-      )
       analysisInput = {
         ...body,
         text: extracted.text,
@@ -31,7 +28,6 @@ export async function POST(request: NextRequest) {
         sourceTitle: extracted.title,
         sourceDescription: extracted.description,
         sourceReliability,
-        corroborationMatches,
       }
     } else if (rawText.length >= 20) {
       analysisInput = {

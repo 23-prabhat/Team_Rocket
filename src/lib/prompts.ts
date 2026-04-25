@@ -1,4 +1,5 @@
 import type { AnalyzeRequest } from './types'
+import type { ClaimSearchEvidence } from './tavily'
 
 const READING_LEVEL_INSTRUCTIONS: Record<NonNullable<AnalyzeRequest['readingLevel']>, string> = {
   eli5: 'Use very simple words a child can understand.',
@@ -25,7 +26,8 @@ export function buildAnalysisPrompt(
     | 'sourceDescription'
     | 'sourceReliability'
     | 'corroborationMatches'
-  >
+  >,
+  claimEvidence: ClaimSearchEvidence[] = []
 ): string {
   const lang = LANGUAGE_INSTRUCTIONS[language] ?? 'English'
   const level = READING_LEVEL_INSTRUCTIONS[readingLevel]
@@ -42,6 +44,19 @@ export function buildAnalysisPrompt(
     .slice(0, 5)
     .map((m, i) => `${i + 1}. [${m.source}] ${m.title} | ${m.snippet}`)
     .join('\n')
+  const claimEvidenceText = claimEvidence
+    .slice(0, 6)
+    .map((entry, index) => {
+      const sources = entry.results
+        .slice(0, 4)
+        .map(
+          (result, sourceIndex) =>
+            `  ${sourceIndex + 1}. [${result.source}] ${result.title} | ${result.snippet}`
+        )
+        .join('\n')
+      return `${index + 1}) Claim: ${entry.claim}\n${sources || '  No web results found.'}`
+    })
+    .join('\n\n')
 
   return `You are a misinformation analyst. Determine if the claim/article is likely real, fake, or uncertain.
 Output language: ${lang}. Reading level: ${level}.
@@ -55,6 +70,9 @@ ${sourceReliability}
 
 POSSIBLE CORROBORATION SNIPPETS:
 ${corroborationSnippets || 'none'}
+
+TAVILY CLAIM EVIDENCE:
+${claimEvidenceText || 'none'}
 
 CONTENT TO ANALYZE:
 ${text}
@@ -71,11 +89,30 @@ Rules:
 - hiddenClauses are red flags/signals (sensational language, no source, manipulated context, impossible claim, suspicious domain, etc).
 - evidence must map specific claims to concrete findings.
 - timeline must estimate stale/recycled context risk from dates/time references.
-- corroboration must summarize whether external snippets support/contradict/mix/insufficient.
+- corroboration must summarize whether external snippets support/contradict/mix/insufficient, prioritizing TAVILY CLAIM EVIDENCE.
 - Provide exactly 3 keyObligations as actionable checks the reader should do next (short phrases).
 - quiz can be empty.
 - summary max 4 sentences.
 - All values in ${lang}. Be concise and factual.`
+}
+
+export function buildClaimExtractionPrompt(text: string, language: string = 'en'): string {
+  const lang = LANGUAGE_INSTRUCTIONS[language] ?? 'English'
+  return `Extract the most important factual claims from the article below.
+Output language: ${lang}.
+
+ARTICLE:
+${text}
+
+Return ONLY raw JSON:
+{"claims":["claim 1","claim 2","claim 3","claim 4","claim 5"]}
+
+Rules:
+- Extract only factual/checkable claims, not opinions.
+- Keep each claim under 25 words.
+- Do not exceed 5 claims.
+- If the article has little verifiable content, return fewer claims.
+- No markdown, no explanation outside JSON.`
 }
 
 export function buildBotSummaryPrompt(text: string, language: string = 'en'): string {
