@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import { generateContent } from './gemini'
-import { buildAnalysisPrompt } from './prompts'
+import { buildAnalysisPrompt, buildClaimExtractionPrompt } from './prompts'
+import { searchClaimsWithTavily, type ClaimSearchEvidence } from './tavily'
 import type { Analysis, AnalyzeRequest } from './types'
 
 const MAX_TEXT_CHARS = 4_000
@@ -12,6 +13,27 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
   }
   const language = req.language ?? 'en'
   const readingLevel = req.readingLevel ?? 'simple'
+  const claimMax = Math.max(1, Math.min(6, Number(process.env.CLAIM_CHECK_MAX_CLAIMS ?? 3)))
+  const tavilyResultsPerClaim = Math.max(
+    1,
+    Math.min(4, Number(process.env.TAVILY_RESULTS_PER_CLAIM ?? 2))
+  )
+
+  console.time('analyze:claim-extraction')
+  const extractedClaims = await extractKeyClaims(text, language, claimMax)
+  console.timeEnd('analyze:claim-extraction')
+
+  console.time('analyze:tavily-search')
+  const claimEvidence = await searchClaimsWithTavily(extractedClaims, tavilyResultsPerClaim).catch(
+    (err) => {
+      console.warn('Tavily search failed, continuing without web evidence:', err)
+      return []
+    }
+  )
+  console.timeEnd('analyze:tavily-search')
+
+  const flattenedMatches = flattenClaimEvidenceMatches(claimEvidence)
+  const fallbackCorroboration = req.corroborationMatches ?? []
 
   const prompt = buildAnalysisPrompt(text, language, readingLevel, {
     sourceUrl: req.sourceUrl,
@@ -19,10 +41,19 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
     sourceTitle: req.sourceTitle,
     sourceDescription: req.sourceDescription,
     sourceReliability: req.sourceReliability,
-    corroborationMatches: req.corroborationMatches,
-  })
+    corroborationMatches: [...fallbackCorroboration, ...flattenedMatches].slice(0, 10),
+  }, claimEvidence)
 
-  const raw = (await generateContent(prompt)).trim()
+  console.time('analyze:verdict')
+  const raw = (
+    await generateContent(prompt, {
+      model: process.env.GROQ_VERDICT_MODEL ?? 'llama-3.3-70b-versatile',
+      temperature: 0.15,
+      maxTokens: 2300,
+      timeoutMs: Math.max(15_000, Number(process.env.GROQ_VERDICT_TIMEOUT_MS ?? 45_000)),
+    })
+  ).trim()
+  console.timeEnd('analyze:verdict')
 
   // Extract the JSON object robustly — find first { and last }
   const start = raw.indexOf('{')
@@ -50,7 +81,10 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
   const quiz = normalizeQuiz(parsed.quiz)
   const evidence = normalizeEvidence(parsed.evidence)
   const timeline = normalizeTimeline(parsed.timeline)
-  const corroboration = normalizeCorroboration(parsed.corroboration, req.corroborationMatches ?? [])
+  const corroboration = normalizeCorroboration(parsed.corroboration, [
+    ...fallbackCorroboration,
+    ...flattenedMatches,
+  ])
 
   return {
     summary: typeof parsed.summary === 'string' ? parsed.summary : '',
@@ -71,6 +105,61 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
     auditId: uuidv4(),
     createdAt: new Date().toISOString(),
   }
+}
+
+async function extractKeyClaims(text: string, language: string, maxClaims: number): Promise<string[]> {
+  const prompt = buildClaimExtractionPrompt(text, language)
+  const raw = await generateContent(prompt, {
+    model: process.env.GROQ_CLAIMS_MODEL ?? 'llama-3.1-8b-instant',
+    temperature: 0.1,
+    maxTokens: 500,
+    timeoutMs: Math.max(8_000, Number(process.env.GROQ_CLAIMS_TIMEOUT_MS ?? 20_000)),
+  })
+
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) {
+    return fallbackClaims(text, maxClaims)
+  }
+
+  try {
+    const parsed = JSON.parse(raw.slice(start, end + 1)) as { claims?: unknown }
+    const claims = normalizeStringArray(parsed.claims, maxClaims)
+      .map((claim) => claim.replace(/\s+/g, ' ').trim())
+      .filter((claim) => claim.length >= 15)
+
+    if (claims.length > 0) {
+      return claims.slice(0, maxClaims)
+    }
+  } catch {
+    // Fall through to fallback claims.
+  }
+
+  return fallbackClaims(text, maxClaims)
+}
+
+function fallbackClaims(text: string, maxClaims: number): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length >= 25 && sentence.length <= 220)
+    .slice(0, maxClaims)
+}
+
+function flattenClaimEvidenceMatches(evidence: ClaimSearchEvidence[]): AnalyzeRequest['corroborationMatches'] {
+  const matches = evidence.flatMap((entry) => entry.results)
+  const dedupedByUrl = new Map<string, NonNullable<AnalyzeRequest['corroborationMatches']>[number]>()
+  for (const item of matches) {
+    if (!dedupedByUrl.has(item.url)) {
+      dedupedByUrl.set(item.url, {
+        title: item.title,
+        url: item.url,
+        source: item.source,
+        snippet: item.snippet,
+      })
+    }
+  }
+  return Array.from(dedupedByUrl.values()).slice(0, 8)
 }
 
 function scoreToLevel(score: number): Analysis['riskLevel'] {
