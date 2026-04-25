@@ -146,7 +146,9 @@ function fallbackClaims(text: string, maxClaims: number): string[] {
     .slice(0, maxClaims)
 }
 
-function flattenClaimEvidenceMatches(evidence: ClaimSearchEvidence[]): AnalyzeRequest['corroborationMatches'] {
+function flattenClaimEvidenceMatches(
+  evidence: ClaimSearchEvidence[]
+): NonNullable<AnalyzeRequest['corroborationMatches']> {
   const matches = evidence.flatMap((entry) => entry.results)
   const dedupedByUrl = new Map<string, NonNullable<AnalyzeRequest['corroborationMatches']>[number]>()
   for (const item of matches) {
