@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Shield, Sun, Moon, Copy, CheckCircle } from "@phosphor-icons/react";
+import { Shield, Sun, Moon, Copy, CheckCircle, ChatCircleDots, X, Microphone } from "@phosphor-icons/react";
 import { motion } from "framer-motion";
 import { RiskMeter } from "@/components/RiskMeter";
 import { RiskClauses } from "@/components/RiskClauses";
@@ -49,6 +49,67 @@ const CONSENSUS_LABELS = {
   },
 } as const;
 
+type ChatRole = "user" | "assistant";
+
+type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  content: string;
+};
+
+const CHAT_COPY = {
+  en: {
+    title: "Analysis Chatbot",
+    subtitle: "Ask follow-up questions about this result.",
+    placeholder: "Ask about risk, evidence, source reliability, or next steps...",
+    send: "Send",
+    listening: "Listening...",
+    startMic: "Use mic",
+    stopMic: "Stop mic",
+    empty: "Ask your first question to start the conversation.",
+    error: "Could not get assistant reply. Please try again.",
+  },
+  hi: {
+    title: "विश्लेषण चैटबॉट",
+    subtitle: "इस परिणाम पर आगे के सवाल पूछें।",
+    placeholder: "जोखिम, प्रमाण, स्रोत विश्वसनीयता या अगले कदम पूछें...",
+    send: "भेजें",
+    listening: "सुन रहा है...",
+    startMic: "माइक से बोलें",
+    stopMic: "माइक रोकें",
+    empty: "बातचीत शुरू करने के लिए अपना पहला सवाल पूछें।",
+    error: "उत्तर नहीं मिल पाया। कृपया फिर से प्रयास करें।",
+  },
+  mr: {
+    title: "विश्लेषण चॅटबॉट",
+    subtitle: "या निकालाबद्दल पुढचे प्रश्न विचारा.",
+    placeholder: "धोका, पुरावे, स्रोत विश्वासार्हता किंवा पुढचे पाऊल विचारा...",
+    send: "पाठवा",
+    listening: "ऐकत आहे...",
+    startMic: "माइक वापरा",
+    stopMic: "माइक थांबवा",
+    empty: "संवाद सुरू करण्यासाठी तुमचा पहिला प्रश्न विचारा.",
+    error: "उत्तर मिळाले नाही. कृपया पुन्हा प्रयत्न करा.",
+  },
+} as const;
+
+const CHAT_INPUT_LOCALE = {
+  en: "en-US",
+  hi: "hi-IN",
+  mr: "mr-IN",
+} as const;
+
+type BrowserSpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-5 font-display text-2xl text-foreground">{children}</h2>;
 }
@@ -83,6 +144,15 @@ export default function AnalyzePage() {
   const { theme, toggle } = useTheme();
   const { t, lang } = useLanguage();
   const [copied, setCopied] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [micSupported, setMicSupported] = useState(false);
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   const [session, setSession] = useState<AnalysisSession | null>(() => {
     if (typeof window === "undefined") return null;
@@ -98,6 +168,7 @@ export default function AnalyzePage() {
   });
 
   const analysis = session?.analysis ?? null;
+  const chatCopy = CHAT_COPY[lang];
   const verdict = analysis?.verdict ?? "uncertain";
   const verdictText = VERDICT_LABELS[lang][verdict];
   const shareText = useMemo(() => {
@@ -112,9 +183,72 @@ export default function AnalyzePage() {
     return lines.join("\n");
   }, [analysis]);
 
+  const analysisContext = useMemo(() => {
+    if (!analysis) return "";
+    const payload = {
+      language: analysis.language,
+      riskScore: analysis.riskScore,
+      riskLevel: analysis.riskLevel,
+      verdict: analysis.verdict ?? "uncertain",
+      confidence: analysis.confidence ?? 0,
+      summary: analysis.summary,
+      keyObligations: analysis.keyObligations,
+      evidence: analysis.evidence,
+      hiddenClauses: analysis.hiddenClauses,
+      sourceReliability: analysis.sourceReliability,
+      corroboration: analysis.corroboration,
+      timeline: analysis.timeline,
+      sourceUrl: analysis.sourceUrl,
+      sourceDomain: analysis.sourceDomain,
+    };
+    return JSON.stringify(payload);
+  }, [analysis]);
+
   useEffect(() => {
     if (!analysis) router.replace("/");
   }, [analysis, router]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const withSpeech = window as Window & {
+      SpeechRecognition?: new () => BrowserSpeechRecognition;
+      webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+    };
+    const SpeechRecognitionCtor = withSpeech.SpeechRecognition ?? withSpeech.webkitSpeechRecognition;
+    setMicSupported(Boolean(SpeechRecognitionCtor));
+
+    if (!SpeechRecognitionCtor) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = CHAT_INPUT_LOCALE[lang];
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.onresult = (event) => {
+      const finalTranscript = Array.from(event.results)
+        .map((r) => r[0]?.transcript ?? "")
+        .join(" ")
+        .trim();
+
+      if (finalTranscript) {
+        setChatInput((prev) => `${prev}${prev ? " " : ""}${finalTranscript}`);
+      }
+      setIsListening(false);
+    };
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+
+    return () => {
+      recognition.stop();
+      recognitionRef.current = null;
+      setIsListening(false);
+    };
+  }, [lang]);
 
   useEffect(() => {
     if (!session || !session.text || session.analysis.language === lang) return;
@@ -146,6 +280,80 @@ export default function AnalyzePage() {
       cancelled = true;
     };
   }, [lang, session]);
+
+  useEffect(() => {
+    if (!chatOpen || !chatScrollRef.current) return;
+    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+  }, [chatMessages, chatLoading, chatOpen]);
+
+  const submitChat = async () => {
+    const question = chatInput.trim();
+    if (!question || !analysis || chatLoading) return;
+
+    const userMessage: ChatMessage = {
+      id: `${Date.now()}_user`,
+      role: "user",
+      content: question,
+    };
+
+    const nextMessages = [...chatMessages, userMessage];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatLoading(true);
+    setChatError(null);
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          language: lang,
+          analysisContext,
+          history: nextMessages.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+        }),
+      });
+
+      const payload = (await response.json()) as { answer?: string; error?: string };
+      const assistantAnswer = payload.answer?.trim() ?? "";
+      if (!response.ok || !assistantAnswer) {
+        throw new Error(payload.error || chatCopy.error);
+      }
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `${Date.now()}_assistant`,
+          role: "assistant",
+          content: assistantAnswer,
+        },
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : chatCopy.error;
+      setChatError(message);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  const toggleMicInput = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition) return;
+
+    if (isListening) {
+      recognition.stop();
+      setIsListening(false);
+      return;
+    }
+
+    recognition.lang = CHAT_INPUT_LOCALE[lang] ?? "en-US";
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+    }
+  };
 
   if (!analysis) {
     return (
@@ -364,6 +572,94 @@ export default function AnalyzePage() {
           </div>
         </div>
       </main>
+
+      <button
+        type="button"
+        onClick={() => setChatOpen((prev) => !prev)}
+        className="fixed right-4 bottom-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-warm text-warm-foreground shadow-xl shadow-warm/35 transition hover:scale-105 hover:bg-warm/90 sm:right-6 sm:bottom-6"
+        aria-label={chatOpen ? "Close chatbot" : "Open chatbot"}
+      >
+        {chatOpen ? <X size={24} weight="bold" /> : <ChatCircleDots size={26} weight="fill" />}
+      </button>
+
+      {chatOpen ? (
+        <div className="fixed right-4 bottom-20 z-[65] w-[min(92vw,26rem)] overflow-hidden rounded-2xl border border-foreground/10 bg-background shadow-2xl sm:right-6 sm:bottom-24">
+          <div className="border-b border-foreground/10 bg-card px-4 py-3">
+            <p className="font-display text-base text-foreground">{chatCopy.title}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{chatCopy.subtitle}</p>
+          </div>
+
+          <div
+            ref={chatScrollRef}
+            className="max-h-[22rem] space-y-3 overflow-y-auto bg-foreground/[0.02] p-4"
+          >
+            {chatMessages.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{chatCopy.empty}</p>
+            ) : (
+              chatMessages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`max-w-[92%] rounded-lg px-3 py-2 text-sm leading-relaxed ${
+                    message.role === "user"
+                      ? "ml-auto bg-warm text-warm-foreground"
+                      : "border border-foreground/10 bg-card text-foreground"
+                  }`}
+                >
+                  <div className="whitespace-pre-wrap">{message.content}</div>
+                  {message.role === "assistant" && (
+                    <div className="-mt-1 mb-1">
+                      <ReadAloud text={message.content} lang={lang} />
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            {chatLoading ? <p className="text-xs text-muted-foreground">...</p> : null}
+          </div>
+
+          <div className="border-t border-foreground/10 bg-background p-3">
+            {chatError ? <p className="mb-2 text-xs text-red-500">{chatError}</p> : null}
+
+            <div className="flex gap-2">
+              <input
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void submitChat();
+                  }
+                }}
+                placeholder={chatCopy.placeholder}
+                className="w-full rounded-xl border border-foreground/15 bg-background px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-warm"
+                maxLength={700}
+              />
+              {micSupported ? (
+                <button
+                  onClick={toggleMicInput}
+                  className={`flex shrink-0 items-center justify-center rounded-xl border px-3 transition ${
+                    isListening
+                      ? "border-red-500/30 bg-red-500/10 text-red-500"
+                      : "border-foreground/20 bg-background text-foreground hover:border-warm/40 hover:text-warm"
+                  }`}
+                  title={isListening ? chatCopy.stopMic : chatCopy.startMic}
+                >
+                  <Microphone size={18} weight={isListening ? "fill" : "regular"} />
+                </button>
+              ) : null}
+              <button
+                onClick={() => void submitChat()}
+                disabled={chatLoading || !chatInput.trim()}
+                className="rounded-xl bg-warm px-3 py-2.5 text-xs font-semibold text-warm-foreground transition hover:bg-warm/90 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {chatCopy.send}
+              </button>
+            </div>
+
+            {isListening ? <p className="mt-2 text-xs text-muted-foreground">{chatCopy.listening}</p> : null}
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
