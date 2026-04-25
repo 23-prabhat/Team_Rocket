@@ -12,7 +12,7 @@ import {
   Translate,
   Exam,
   ArrowRight,
-  TelegramLogo,
+  WhatsappLogo,
   GoogleChromeLogo,
   Globe,
   Sun,
@@ -71,7 +71,7 @@ function Navbar() {
             <Shield size={18} weight="bold" />
           </div>
           <span className="font-display text-xl tracking-tight text-foreground">
-            ClearConsent
+            Veritron
           </span>
         </Link>
 
@@ -112,6 +112,7 @@ function HeroSection() {
       <div className="pointer-events-none absolute top-20 -right-32 h-[500px] w-[500px] rounded-full bg-warm/[0.07] blur-3xl" />
       <div className="pointer-events-none absolute -bottom-20 -left-20 h-[400px] w-[400px] rounded-full bg-warm/[0.05] blur-3xl" />
 
+
       <div className="relative mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <motion.div
@@ -134,7 +135,7 @@ function HeroSection() {
             <br />
             {t.hero.headline2}{" "}
             <span className="relative inline-block">
-              <span className="relative z-10 italic text-warm">{t.hero.headline3}</span>
+              <span className="relative z-10 font-semibold text-warm">{t.hero.headline3}</span>
               <span className="absolute -bottom-1 left-0 right-0 h-3 bg-warm/15 -rotate-1 rounded-sm" />
             </span>
           </motion.h1>
@@ -291,7 +292,7 @@ function FeaturesSection() {
 }
 
 // ─── channels ─────────────────────────────────────────────────────────────────
-const channelIcons = [Globe, GoogleChromeLogo, TelegramLogo];
+const channelIcons = [Globe, GoogleChromeLogo, WhatsappLogo];
 const channelAccents = [
   "from-warm/10 to-warm/5",
   "from-blue-500/10 to-blue-500/5",
@@ -407,7 +408,7 @@ function Footer() {
           <div className="flex size-7 items-center justify-center rounded-md bg-warm-foreground/15">
             <Shield size={15} weight="bold" className="text-warm-foreground" />
           </div>
-          <span className="font-display text-base text-warm-foreground/80">ClearConsent</span>
+          <span className="font-display text-base text-warm-foreground/80">Veritron</span>
         </div>
         <div className="flex items-center gap-6 text-sm font-medium text-warm-foreground/60">
           <a
@@ -423,7 +424,7 @@ function Footer() {
             {t.footer.links.twitter}
           </a>
           <a
-            href="https://t.me"
+            href="https://www.whatsapp.com/"
             className="transition-colors hover:text-warm-foreground"
           >
             {t.footer.links.telegram}
@@ -433,8 +434,8 @@ function Footer() {
 
       {/* large wordmark */}
       <div className="relative px-4 pt-4 pb-0 max-w-6xl mx-auto overflow-hidden">
-        <p className="font-display italic text-[clamp(4rem,14vw,11rem)] leading-[0.85] font-bold text-warm-foreground/[0.12] select-none tracking-tight">
-          ClearConsent
+        <p className="font-display text-[clamp(4rem,14vw,11rem)] leading-[0.85] font-bold text-warm-foreground/[0.12] select-none tracking-tight">
+          Veritron
         </p>
       </div>
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { DM_Sans, Space_Grotesk, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { ThemeProvider } from "@/contexts/theme";
@@ -11,11 +11,10 @@ const dmSans = DM_Sans({
   weight: ["400", "500", "600", "700"],
 });
 
-const instrumentSerif = Instrument_Serif({
+const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
   variable: "--font-display",
-  weight: "400",
-  style: ["normal", "italic"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const jetbrainsMono = JetBrains_Mono({
@@ -24,9 +23,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ClearConsent — Understand Before You Agree",
+  title: "Veritron — Verify Before You Share",
   description:
-    "AI-powered document analysis that decodes financial agreements, flags hidden risks, and ensures you truly understand before signing.",
+    "AI-powered misinformation detection for regional Indian languages across web, browser extension, and WhatsApp with explainable verdicts.",
 };
 
 export default function RootLayout({
@@ -40,7 +39,7 @@ export default function RootLayout({
       className={cn(
         "h-full antialiased",
         dmSans.variable,
-        instrumentSerif.variable,
+        spaceGrotesk.variable,
         jetbrainsMono.variable
       )}
     >
