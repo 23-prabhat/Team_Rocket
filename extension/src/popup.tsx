@@ -6,17 +6,21 @@ import {
   DEFAULT_LANGUAGE,
   getCredibilityLabel,
   getStorageKey,
-  getTruthLikelihood,
   getUiCopy,
   getVerdictText,
-  getWrongnessPercentage,
   LANGUAGE_OPTIONS,
   type SupportedLanguage,
 } from "./shared";
 
 type AnalysisCacheEntry =
   | { status: "loading"; url: string; updatedAt: string }
-  | { status: "success"; url: string; updatedAt: string; data: Analysis }
+  | {
+      status: "success";
+      url: string;
+      updatedAt: string;
+      data: Analysis;
+      languageCache?: Partial<Record<SupportedLanguage, Analysis>>;
+    }
   | { status: "error"; url: string; updatedAt: string; message: string };
 
 type PopupState = {
@@ -86,7 +90,7 @@ function PopupApp() {
         setState({
           tabId,
           tabUrl,
-          entry: isMatchingEntry(entry, tabUrl, preferredLanguage) ? entry : null,
+          entry: normalizeEntryForLanguage(entry, tabUrl, preferredLanguage),
           isLoading: false,
           loadError: null,
         });
@@ -126,7 +130,7 @@ function PopupApp() {
         const nextEntry = (change.newValue as AnalysisCacheEntry | undefined) ?? null;
         return {
           ...currentState,
-          entry: isMatchingEntry(nextEntry, currentState.tabUrl, selectedLanguage) ? nextEntry : null,
+          entry: normalizeEntryForLanguage(nextEntry, currentState.tabUrl, selectedLanguage),
           isLoading: false,
         };
       });
@@ -346,37 +350,16 @@ function ResultState({
   onStopSpeech: () => void;
 }) {
   const copy = getUiCopy(selectedLanguage);
-  const falseRisk = result.riskScore;
-  const truthLikelihood = getTruthLikelihood(result.riskScore);
-  const wrongness = getWrongnessPercentage(result.riskScore);
 
   return (
     <>
       <div className="scoreCard">
         <div>
-          <p className="sectionLabel">{copy.fakeNewsPercentage}</p>
-          <div className="scoreLine">
-            <span className="scoreValue">{result.riskScore}%</span>
-          </div>
+          <p className="sectionLabel">{copy.verdict}</p>
+          <p className="bodyText">{getVerdictText(result.riskScore, selectedLanguage)}</p>
           <p className="metaText">{getCredibilityLabel(result.riskScore)}</p>
         </div>
         <span className={`riskBadge risk-${result.riskLevel}`}>{result.riskLevel}</span>
-      </div>
-
-      <div className="card compactStatsCard">
-        <p className="sectionLabel">{copy.verdict}</p>
-        <div className="statRow">
-          <span className="statName">{copy.falseRiskPercentage}</span>
-          <span className="statNumber">{falseRisk}%</span>
-        </div>
-        <div className="statRow">
-          <span className="statName">{copy.truthLikelihoodPercentage}</span>
-          <span className="statNumber">{truthLikelihood}%</span>
-        </div>
-        <div className="statRow">
-          <span className="statName">{copy.wrongnessPercentage}</span>
-          <span className="statNumber">{wrongness}%</span>
-        </div>
       </div>
 
       <div className="card">
@@ -439,6 +422,34 @@ function isMatchingEntry(
   language: SupportedLanguage,
 ) {
   return Boolean(entry && entry.url === url && (entry.status !== "success" || entry.data.language === language));
+}
+
+function normalizeEntryForLanguage(
+  entry: AnalysisCacheEntry | null,
+  url: string,
+  language: SupportedLanguage
+): AnalysisCacheEntry | null {
+  if (!entry || entry.url !== url) {
+    return null;
+  }
+
+  if (entry.status !== "success") {
+    return entry;
+  }
+
+  if (entry.data.language === language) {
+    return entry;
+  }
+
+  const cached = entry.languageCache?.[language];
+  if (!cached) {
+    return null;
+  }
+
+  return {
+    ...entry,
+    data: cached,
+  };
 }
 
 function getOneLineSummary(summary: string) {

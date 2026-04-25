@@ -26,8 +26,16 @@ type RuntimeMessage =
 
 type AnalysisCacheEntry =
   | { status: "loading"; url: string; updatedAt: string }
-  | { status: "success"; url: string; updatedAt: string; data: Analysis }
+  | {
+      status: "success";
+      url: string;
+      updatedAt: string;
+      data: Analysis;
+      languageCache?: Partial<Record<SupportedLanguage, Analysis>>;
+    }
   | { status: "error"; url: string; updatedAt: string; message: string };
+
+const prefetchInFlightByTab = new Map<number, Set<SupportedLanguage>>();
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender: { tab?: { id?: number; url?: string } }) => {
   if (message.type === "TRIGGER_ANALYSIS") {
@@ -64,7 +72,29 @@ async function handleTriggerFromPopup(targetLanguage?: SupportedLanguage) {
     return;
   }
 
+  const selectedLanguage = sanitizeLanguage(targetLanguage ?? (await getPreferredLanguage()));
   const existingEntry = await getAnalysisState(activeTab.id);
+
+  const cachedResult = getCachedAnalysisForLanguage(existingEntry, activeTab.url, selectedLanguage);
+  if (cachedResult) {
+    const state: AnalysisCacheEntry = {
+      status: "success",
+      url: activeTab.url,
+      updatedAt: new Date().toISOString(),
+      data: cachedResult,
+      languageCache:
+        existingEntry?.status === "success"
+          ? { ...(existingEntry.languageCache ?? {}), [cachedResult.language as SupportedLanguage]: cachedResult }
+          : { [cachedResult.language as SupportedLanguage]: cachedResult },
+    };
+    await setAnalysisState(activeTab.id, state);
+    await sendMessageToTab(activeTab.id, {
+      type: "ANALYSIS_RESULT",
+      data: cachedResult,
+    });
+    return;
+  }
+
   if (!existingEntry || existingEntry.url !== activeTab.url || existingEntry.status !== "success") {
     await setAnalysisState(activeTab.id, {
       status: "loading",
@@ -74,7 +104,6 @@ async function handleTriggerFromPopup(targetLanguage?: SupportedLanguage) {
   }
 
   try {
-    const selectedLanguage = sanitizeLanguage(targetLanguage ?? (await getPreferredLanguage()));
     await chrome.tabs.sendMessage(activeTab.id, {
       type: "TRIGGER_ANALYSIS",
       targetLanguage: selectedLanguage,
@@ -96,14 +125,11 @@ async function handleAnalyzeRequest(message: AnalyzeRequestMessage, tabId?: numb
 
   const targetLanguage = sanitizeLanguage(message.targetLanguage);
   const cachedEntry = await getAnalysisState(tabId);
-  if (
-    cachedEntry?.status === "success" &&
-    cachedEntry.url === message.url &&
-    cachedEntry.data.language === targetLanguage
-  ) {
+  const cachedResult = getCachedAnalysisForLanguage(cachedEntry, message.url, targetLanguage);
+  if (cachedResult) {
     await sendMessageToTab(tabId, {
       type: "ANALYSIS_RESULT",
-      data: cachedEntry.data,
+      data: cachedResult,
     });
     return;
   }
@@ -141,19 +167,125 @@ async function handleAnalyzeRequest(message: AnalyzeRequestMessage, tabId?: numb
       throw new Error("The analysis response was not in the expected format.");
     }
 
+    const normalizedPayload: Analysis =
+      payload.language === targetLanguage
+        ? payload
+        : {
+            ...payload,
+            // Keep extension UI language consistent with the user's selected target language.
+            language: targetLanguage,
+          };
+
     const state: AnalysisCacheEntry = {
       status: "success",
       url: message.url,
       updatedAt: new Date().toISOString(),
-      data: payload,
+      data: normalizedPayload,
+      languageCache:
+        cachedEntry?.status === "success"
+          ? { ...(cachedEntry.languageCache ?? {}), [targetLanguage]: normalizedPayload }
+          : { [targetLanguage]: normalizedPayload },
     };
 
     await setAnalysisState(tabId, state);
-    await sendMessageToTab(tabId, { type: "ANALYSIS_RESULT", data: payload });
+    await sendMessageToTab(tabId, { type: "ANALYSIS_RESULT", data: normalizedPayload });
+    void prefetchOtherLanguages(tabId, message, targetLanguage, state);
   } catch (error) {
     const messageText = getAnalyzeFailureMessage(error);
 
     await handleFailure(tabId, message.url, messageText);
+  }
+}
+
+function getCachedAnalysisForLanguage(
+  entry: AnalysisCacheEntry | null,
+  url: string,
+  language: SupportedLanguage
+): Analysis | null {
+  if (!entry || entry.status !== "success" || entry.url !== url) {
+    return null;
+  }
+
+  if (entry.data.language === language) {
+    return entry.data;
+  }
+
+  return entry.languageCache?.[language] ?? null;
+}
+
+async function prefetchOtherLanguages(
+  tabId: number,
+  message: AnalyzeRequestMessage,
+  currentLanguage: SupportedLanguage,
+  entry: Extract<AnalysisCacheEntry, { status: "success" }>
+) {
+  if (!API_BASE_URL) return;
+
+  const remainingLanguages = LANGUAGE_OPTIONS.map((option) => option.value).filter(
+    (lang) => lang !== currentLanguage && !entry.languageCache?.[lang]
+  );
+
+  if (remainingLanguages.length === 0) return;
+
+  let inFlight = prefetchInFlightByTab.get(tabId);
+  if (!inFlight) {
+    inFlight = new Set<SupportedLanguage>();
+    prefetchInFlightByTab.set(tabId, inFlight);
+  }
+
+  for (const lang of remainingLanguages) {
+    if (inFlight.has(lang)) continue;
+    inFlight.add(lang);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text: message.text,
+          language: lang,
+          readingLevel: "simple",
+          source: "extension",
+        }),
+      });
+
+      const payload = (await response.json()) as unknown;
+      if (!response.ok || !isAnalysis(payload)) {
+        continue;
+      }
+
+      const normalizedPayload: Analysis =
+        payload.language === lang
+          ? payload
+          : {
+              ...payload,
+              language: lang,
+            };
+
+      const latestState = await getAnalysisState(tabId);
+      if (!latestState || latestState.status !== "success" || latestState.url !== message.url) {
+        continue;
+      }
+
+      await setAnalysisState(tabId, {
+        ...latestState,
+        updatedAt: new Date().toISOString(),
+        languageCache: {
+          ...(latestState.languageCache ?? {}),
+          [lang]: normalizedPayload,
+        },
+      });
+    } catch {
+      // Background prefetch is best-effort only.
+    } finally {
+      inFlight.delete(lang);
+    }
+  }
+
+  if (inFlight.size === 0) {
+    prefetchInFlightByTab.delete(tabId);
   }
 }
 

@@ -3,10 +3,8 @@ import { pauseSpeech, resumeSpeech, speakText, stopSpeech } from "./readAloud";
 import {
   DEFAULT_LANGUAGE,
   getCredibilityLabel,
-  getTruthLikelihood,
   getUiCopy,
   getVerdictText,
-  getWrongnessPercentage,
   LANGUAGE_OPTIONS,
   type SupportedLanguage,
 } from "./shared";
@@ -363,32 +361,13 @@ function renderSidebar(
     riskCard.className = "riskCard";
     riskCard.innerHTML = `
       <div>
-        <p class="sectionLabel">${escapeHtml(copy.fakeNewsPercentage)}</p>
-        <p class="score">${state.data.riskScore}<span>%</span></p>
+        <p class="sectionLabel">${escapeHtml(copy.verdict)}</p>
+        <p class="summaryText">${escapeHtml(getVerdictText(state.data.riskScore, state.targetLanguage))}</p>
         <p class="helperText">${escapeHtml(getCredibilityLabel(state.data.riskScore))}</p>
       </div>
       <span class="riskBadge risk-${state.data.riskLevel}">${escapeHtml(state.data.riskLevel)}</span>
     `;
     content.appendChild(riskCard);
-
-    const percentageCard = document.createElement("section");
-    percentageCard.className = "sectionCard";
-    percentageCard.innerHTML = `
-      <p class="sectionLabel">${escapeHtml(copy.verdict)}</p>
-      <div class="statRow">
-        <span class="statName">${escapeHtml(copy.falseRiskPercentage)}</span>
-        <span class="statNumber">${state.data.riskScore}%</span>
-      </div>
-      <div class="statRow">
-        <span class="statName">${escapeHtml(copy.truthLikelihoodPercentage)}</span>
-        <span class="statNumber">${getTruthLikelihood(state.data.riskScore)}%</span>
-      </div>
-      <div class="statRow">
-        <span class="statName">${escapeHtml(copy.wrongnessPercentage)}</span>
-        <span class="statNumber">${getWrongnessPercentage(state.data.riskScore)}%</span>
-      </div>
-    `;
-    content.appendChild(percentageCard);
 
     const verdictCard = document.createElement("section");
     verdictCard.className = "sectionCard";
