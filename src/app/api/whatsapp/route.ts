@@ -36,10 +36,17 @@ const TEXTS: Record<
     unsupportedMedia: string
     chooseLanguage: string
     prompt: string
-    context: string
-    topSignals: string
-    corroboration: string
-    checks: string
+    summary: string
+    reasoning: string
+    sourceCheck: string
+    nextStep: string
+    noReasoning: string
+    noCrossCheck: string
+    noNextStep: string
+    confidence: string
+    sourceReliability: string
+    timeline: string
+    alsoReportedBy: string
     failed: string
   }
 > = {
@@ -50,10 +57,17 @@ const TEXTS: Record<
       'Choose output language by replying with one option:\nEN = English\nHI = Hindi\nMR = Marathi',
     prompt:
       'Send a news URL or photo. Add language in the same message if you want:\nEN <url>\nHI <url>\nMR <url>',
-    context: 'Context',
-    topSignals: 'Top Signals',
-    corroboration: 'Cross-Source Check',
-    checks: 'What to check next',
+    summary: 'Plain-language summary',
+    reasoning: 'Why this result',
+    sourceCheck: 'Source and cross-check',
+    nextStep: 'Best next step',
+    noReasoning: 'No strong reasoning signals were extracted from the content.',
+    noCrossCheck: 'Not enough source or cross-source information was available.',
+    noNextStep: 'Compare this claim with at least one trusted independent source.',
+    confidence: 'Confidence',
+    sourceReliability: 'Source reliability',
+    timeline: 'Timeline',
+    alsoReportedBy: 'Also reported by',
     failed: 'Sorry, I could not analyze this input.',
   },
   hi: {
@@ -63,10 +77,17 @@ const TEXTS: Record<
       'आउटपुट भाषा चुनने के लिए उत्तर दें:\nEN = English\nHI = Hindi\nMR = Marathi',
     prompt:
       'समाचार URL या फोटो भेजें। चाहें तो उसी संदेश में भाषा जोड़ें:\nEN <url>\nHI <url>\nMR <url>',
-    context: 'संदर्भ',
-    topSignals: 'मुख्य संकेत',
-    corroboration: 'क्रॉस-सोर्स जाँच',
-    checks: 'आगे क्या जाँचें',
+    summary: 'सरल सार',
+    reasoning: 'यह निष्कर्ष क्यों आया',
+    sourceCheck: 'स्रोत और क्रॉस-जाँच',
+    nextStep: 'सबसे अच्छा अगला कदम',
+    noReasoning: 'सामग्री से कोई मजबूत कारण-संकेत स्पष्ट नहीं निकले।',
+    noCrossCheck: 'पर्याप्त स्रोत या क्रॉस-सोर्स जानकारी उपलब्ध नहीं थी।',
+    noNextStep: 'इस दावे को कम-से-कम एक विश्वसनीय स्वतंत्र स्रोत से मिलाइए।',
+    confidence: 'विश्वास स्तर',
+    sourceReliability: 'स्रोत विश्वसनीयता',
+    timeline: 'समय-संदर्भ',
+    alsoReportedBy: 'इन स्रोतों ने भी रिपोर्ट किया',
     failed: 'माफ़ कीजिए, मैं इस इनपुट का विश्लेषण नहीं कर सका।',
   },
   mr: {
@@ -76,10 +97,17 @@ const TEXTS: Record<
       'आउटपुट भाषा निवडण्यासाठी उत्तर द्या:\nEN = English\nHI = Hindi\nMR = Marathi',
     prompt:
       'बातमीची URL किंवा फोटो पाठवा. हवे असल्यास त्याच मेसेजमध्ये भाषा द्या:\nEN <url>\nHI <url>\nMR <url>',
-    context: 'संदर्भ',
-    topSignals: 'मुख्य संकेत',
-    corroboration: 'क्रॉस-सोर्स पडताळणी',
-    checks: 'पुढे काय पडताळावे',
+    summary: 'सोपा सारांश',
+    reasoning: 'हा निकाल का आला',
+    sourceCheck: 'स्रोत आणि क्रॉस-पडताळणी',
+    nextStep: 'सर्वात चांगले पुढचे पाऊल',
+    noReasoning: 'मजकुरातून ठोस कारण-संकेत स्पष्टपणे मिळाले नाहीत.',
+    noCrossCheck: 'पुरेशी स्रोत किंवा क्रॉस-सोर्स माहिती उपलब्ध नव्हती.',
+    noNextStep: 'हा दावा किमान एका विश्वासार्ह स्वतंत्र स्रोताशी तपासा.',
+    confidence: 'विश्वास पातळी',
+    sourceReliability: 'स्रोत विश्वासार्हता',
+    timeline: 'वेळ संदर्भ',
+    alsoReportedBy: 'यांनीही ही बातमी दिली',
     failed: 'क्षमस्व, या इनपुटचे विश्लेषण करता आले नाही.',
   },
 }
@@ -120,44 +148,62 @@ function toSafeMessage(text: string, max = 1500): string {
   return `${text.slice(0, max - 3)}...`
 }
 
+function formatReasoning(analysis: Awaited<ReturnType<typeof analyze>>, t: (typeof TEXTS)[LangChoice]) {
+  const reasons = analysis.hiddenClauses.length
+    ? analysis.hiddenClauses.slice(0, 2).map((c) => `• ${c.explanation}`)
+    : analysis.evidence.slice(0, 2).map((e) => `• ${e.finding}`)
+
+  return reasons.length ? reasons.join('\n') : `• ${t.noReasoning}`
+}
+
+function formatSourceCheck(analysis: Awaited<ReturnType<typeof analyze>>, t: (typeof TEXTS)[LangChoice]) {
+  const lines: string[] = []
+
+  if (analysis.sourceReliability) {
+    lines.push(
+      `• ${t.sourceReliability}: ${analysis.sourceReliability.level} (${analysis.sourceReliability.score}/100)`
+    )
+  }
+
+  if (analysis.corroboration) {
+    lines.push(`• ${analysis.corroboration.summary}`)
+    const matches = analysis.corroboration.matches
+      .slice(0, 2)
+      .map((m) => `• ${t.alsoReportedBy}: ${m.source}`)
+    lines.push(...matches)
+  }
+
+  if (analysis.timeline?.notes?.[0]) {
+    lines.push(`• ${t.timeline}: ${analysis.timeline.notes[0]}`)
+  }
+
+  return lines.length ? lines.join('\n') : `• ${t.noCrossCheck}`
+}
+
+function formatNextStep(analysis: Awaited<ReturnType<typeof analyze>>, t: (typeof TEXTS)[LangChoice]) {
+  return analysis.keyObligations[0] ? `• ${analysis.keyObligations[0]}` : `• ${t.noNextStep}`
+}
+
 function formatReply(analysis: Awaited<ReturnType<typeof analyze>>, lang: LangChoice): string {
   const t = TEXTS[lang]
   const verdict = analysis.verdict ?? 'uncertain'
   const verdictLabel = VERDICT_LABELS[lang][verdict]
   const emoji = riskEmoji(analysis.riskLevel)
-  const warnings = analysis.hiddenClauses.length
-    ? analysis.hiddenClauses
-    .slice(0, 2)
-    .map((c) => `• ${c.category}: ${c.explanation}`)
-    .join('\n')
-    : analysis.evidence
-        .slice(0, 2)
-        .map((e) => `• ${e.claim}: ${e.finding}`)
-        .join('\n')
 
-  const corroboration = analysis.corroboration
-    ? `${analysis.corroboration.summary}\n${analysis.corroboration.matches
-        .slice(0, 2)
-        .map((m) => `• ${m.source}`)
-        .join('\n')}`
-    : '•'
+  return toSafeMessage(`${emoji} ${verdictLabel}
+Risk: ${analysis.riskScore}/100 | ${t.confidence}: ${analysis.confidence ?? 0}%
 
-  return toSafeMessage(`${emoji} ${verdictLabel} | Risk ${analysis.riskScore}/100 | Confidence ${analysis.confidence ?? 0}%
-
-${t.context}:
+${t.summary}:
 ${analysis.summary}
 
-${t.topSignals}:
-${warnings || '•'}
+${t.reasoning}:
+${formatReasoning(analysis, t)}
 
-${t.corroboration}:
-${corroboration}
+${t.sourceCheck}:
+${formatSourceCheck(analysis, t)}
 
-${t.checks}:
-${analysis.keyObligations
-  .slice(0, 3)
-  .map((o) => `• ${o}`)
-  .join('\n')}`)
+${t.nextStep}:
+${formatNextStep(analysis, t)}`)
 }
 
 async function analyzeUrl(url: string, language: LangChoice): Promise<Awaited<ReturnType<typeof analyze>>> {
