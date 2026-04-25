@@ -16,7 +16,7 @@ import { useTheme } from "@/contexts/theme";
 import { useLanguage } from "@/contexts/language";
 import type { Analysis, AnalysisSession } from "@/lib/types";
 
-const STORAGE_KEY = "clearconsent_analysis";
+const STORAGE_KEY = "veritron_analysis";
 
 function fmt(d: Date) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -188,7 +188,7 @@ export default function AnalyzePage() {
               <Shield size={18} weight="bold" />
             </div>
             <span className="font-display text-xl tracking-tight text-foreground">
-              ClearConsent
+              Veritron
             </span>
           </Link>
           <div className="flex items-center gap-3">

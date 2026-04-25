@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/language";
 import type { Analysis, AnalysisSession } from "@/lib/types";
 
-const ACCEPTED_TYPES = ["application/pdf", "text/plain"];
-const ACCEPTED_EXTENSIONS = [".pdf", ".txt"];
+const ACCEPTED_TYPES = ["application/pdf", "text/plain", "image/png", "image/jpeg", "image/webp"];
+const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".webp"];
 const MAX_SIZE_MB = 10;
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
-const STORAGE_KEY = "clearconsent_analysis";
+const STORAGE_KEY = "veritron_analysis";
 
 const READING_LEVELS = [
   { value: "eli5", label: "ELI5" },
@@ -129,7 +129,7 @@ export function UploadZone() {
         readingLevel,
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-      router.push("/analyze");
+      router.push("/analyse");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setIsUploading(false);
