@@ -91,7 +91,7 @@ Rules:
 - timeline must estimate stale/recycled context risk from dates/time references.
 - corroboration must summarize whether external snippets support/contradict/mix/insufficient, prioritizing TAVILY CLAIM EVIDENCE.
 - Provide exactly 3 keyObligations as actionable checks the reader should do next (short phrases).
-- quiz can be empty.
+- Provide exactly 3 quiz questions with 4 short options each.
 - summary max 4 sentences.
 - All values in ${lang}. Be concise and factual.`
 }
@@ -118,9 +118,9 @@ Rules:
 export function buildBotSummaryPrompt(text: string, language: string = 'en'): string {
   const lang = LANGUAGE_INSTRUCTIONS[language] ?? 'English'
 
-  return `Analyze this document. Output language: ${lang}.
+  return `Analyze this content for misinformation. Output language: ${lang}.
 
-DOCUMENT:
+CONTENT:
 ${text}
 
 Return ONLY raw JSON: {"riskScore":0,"riskLevel":"low","summary":"1-2 sentences","topWarnings":["...","...","..."]}`

@@ -6,6 +6,10 @@ import {
   DEFAULT_LANGUAGE,
   getCredibilityLabel,
   getStorageKey,
+  getTruthLikelihood,
+  getUiCopy,
+  getVerdictText,
+  getWrongnessPercentage,
   LANGUAGE_OPTIONS,
   type SupportedLanguage,
 } from "./shared";
@@ -34,6 +38,7 @@ function PopupApp() {
   const [selectedLanguage, setSelectedLanguage] = useState<SupportedLanguage>(DEFAULT_LANGUAGE);
   const [speechStatus, setSpeechStatus] = useState<SpeechStatus>("idle");
   const [speechSupported, setSpeechSupported] = useState(false);
+  const copy = getUiCopy(selectedLanguage);
 
   useEffect(() => {
     setSpeechSupported(typeof window !== "undefined" && "speechSynthesis" in window);
@@ -217,17 +222,14 @@ function PopupApp() {
       <div style={styles.panel}>
         <div style={styles.header}>
           <p style={styles.eyebrow}>Veritron</p>
-          <h1 style={styles.title}>Regional Misinformation Detector</h1>
-          <p style={styles.subtitle}>
-            Scan the current page, estimate fake-news risk, and explain the result in your chosen
-            language.
-          </p>
+          <h1 style={styles.title}>{copy.appTitle}</h1>
+          <p style={styles.subtitle}>{copy.appSubtitle}</p>
         </div>
 
         <div className="card controlsCard">
           <div>
-            <p className="sectionLabel">Output language</p>
-            <p className="bodyText">Choose how Veritron explains the result.</p>
+            <p className="sectionLabel">{copy.outputLanguage}</p>
+            <p className="bodyText">{copy.outputLanguageHint}</p>
           </div>
           <select className="languageSelect" value={selectedLanguage} onChange={handleLanguageChange}>
             {LANGUAGE_OPTIONS.map((option) => (
@@ -239,9 +241,9 @@ function PopupApp() {
         </div>
 
         {state.isLoading ? (
-          <LoadingState />
+          <LoadingState selectedLanguage={selectedLanguage} />
         ) : errorMessage ? (
-          <ErrorState message={errorMessage} onRetry={triggerAnalysis} />
+          <ErrorState message={errorMessage} onRetry={triggerAnalysis} selectedLanguage={selectedLanguage} />
         ) : result ? (
           <ResultState
             result={result}
@@ -256,13 +258,13 @@ function PopupApp() {
             }}
           />
         ) : (
-          <EmptyState onAnalyze={triggerAnalysis} unsupported={unsupported} />
+          <EmptyState onAnalyze={triggerAnalysis} unsupported={unsupported} selectedLanguage={selectedLanguage} />
         )}
 
         {state.entry?.status === "loading" ? (
           <div className="statusCard">
             <div className="spinner" aria-hidden="true" />
-            <p className="statusText">Checking the page for suspicious claims...</p>
+            <p className="statusText">{copy.checkingPage}</p>
           </div>
         ) : null}
       </div>
@@ -270,11 +272,12 @@ function PopupApp() {
   );
 }
 
-function LoadingState() {
+function LoadingState({ selectedLanguage }: { selectedLanguage: SupportedLanguage }) {
+  const copy = getUiCopy(selectedLanguage);
   return (
     <div className="statusCard">
       <div className="spinner" aria-hidden="true" />
-      <p className="statusText">Loading current tab...</p>
+      <p className="statusText">{copy.loadingTab}</p>
     </div>
   );
 }
@@ -282,20 +285,23 @@ function LoadingState() {
 function EmptyState({
   onAnalyze,
   unsupported,
+  selectedLanguage,
 }: {
   onAnalyze: (targetLanguage?: SupportedLanguage) => Promise<void>;
   unsupported: boolean;
+  selectedLanguage: SupportedLanguage;
 }) {
+  const copy = getUiCopy(selectedLanguage);
   return (
     <div className="card">
-      <p className="sectionLabel">Current page</p>
+      <p className="sectionLabel">{copy.currentPage}</p>
       <p className="bodyText">
         {unsupported
-          ? "Open a regular http or https page to analyze it."
-          : "No misinformation analysis is stored for this tab yet."}
+          ? copy.openRegularPage
+          : copy.noAnalysisStored}
       </p>
       <button className="primaryButton" onClick={() => void onAnalyze()} disabled={unsupported}>
-        Analyze this page
+        {copy.analyzeThisPage}
       </button>
     </div>
   );
@@ -304,16 +310,19 @@ function EmptyState({
 function ErrorState({
   message,
   onRetry,
+  selectedLanguage,
 }: {
   message: string;
   onRetry: (targetLanguage?: SupportedLanguage) => Promise<void>;
+  selectedLanguage: SupportedLanguage;
 }) {
+  const copy = getUiCopy(selectedLanguage);
   return (
     <div className="card errorCard">
-      <p className="sectionLabel">Analysis error</p>
+      <p className="sectionLabel">{copy.analysisError}</p>
       <p className="bodyText">{message}</p>
       <button className="primaryButton" onClick={() => void onRetry()}>
-        Try again
+        {copy.tryAgain}
       </button>
     </div>
   );
@@ -336,11 +345,16 @@ function ResultState({
   onToggleSpeech: () => void;
   onStopSpeech: () => void;
 }) {
+  const copy = getUiCopy(selectedLanguage);
+  const falseRisk = result.riskScore;
+  const truthLikelihood = getTruthLikelihood(result.riskScore);
+  const wrongness = getWrongnessPercentage(result.riskScore);
+
   return (
     <>
       <div className="scoreCard">
         <div>
-          <p className="sectionLabel">Fake news percentage</p>
+          <p className="sectionLabel">{copy.fakeNewsPercentage}</p>
           <div className="scoreLine">
             <span className="scoreValue">{result.riskScore}%</span>
           </div>
@@ -349,14 +363,37 @@ function ResultState({
         <span className={`riskBadge risk-${result.riskLevel}`}>{result.riskLevel}</span>
       </div>
 
-      <div className="card">
-        <p className="sectionLabel">Explanation</p>
-        <p className="bodyText">{getOneLineSummary(result.summary)}</p>
-        <p className="metaText">Output: {LANGUAGE_OPTIONS.find((item) => item.value === selectedLanguage)?.label}</p>
+      <div className="card compactStatsCard">
+        <p className="sectionLabel">{copy.verdict}</p>
+        <div className="statRow">
+          <span className="statName">{copy.falseRiskPercentage}</span>
+          <span className="statNumber">{falseRisk}%</span>
+        </div>
+        <div className="statRow">
+          <span className="statName">{copy.truthLikelihoodPercentage}</span>
+          <span className="statNumber">{truthLikelihood}%</span>
+        </div>
+        <div className="statRow">
+          <span className="statName">{copy.wrongnessPercentage}</span>
+          <span className="statNumber">{wrongness}%</span>
+        </div>
       </div>
 
       <div className="card">
-        <p className="sectionLabel">Top reasons flagged</p>
+        <p className="sectionLabel">{copy.explanation}</p>
+        <p className="bodyText">{getVerdictText(result.riskScore, selectedLanguage)}</p>
+      </div>
+
+      <div className="card">
+        <p className="sectionLabel">{copy.topReasons}</p>
+        <p className="bodyText">{getOneLineSummary(result.summary)}</p>
+        <p className="metaText">
+          {copy.output}: {LANGUAGE_OPTIONS.find((item) => item.value === selectedLanguage)?.label}
+        </p>
+      </div>
+
+      <div className="card">
+        <p className="sectionLabel">{copy.explanation}</p>
         {result.hiddenClauses.slice(0, 2).length > 0 ? (
           <div className="reasonList">
             {result.hiddenClauses.slice(0, 2).map((clause, index) => (
@@ -367,26 +404,30 @@ function ResultState({
             ))}
           </div>
         ) : (
-          <p className="bodyText">No detailed reasons were returned for this page.</p>
+          <p className="bodyText">{copy.noReasons}</p>
         )}
       </div>
 
       {speechSupported ? (
         <div className="card">
-          <p className="sectionLabel">Read aloud</p>
+          <p className="sectionLabel">{copy.readAloud}</p>
           <div className="actionRow">
             <button className="secondaryButton" onClick={onToggleSpeech}>
-              {speechStatus === "playing" ? "Pause audio" : speechStatus === "paused" ? "Resume audio" : "Play audio"}
+              {speechStatus === "playing"
+                ? copy.pauseAudio
+                : speechStatus === "paused"
+                  ? copy.resumeAudio
+                  : copy.playAudio}
             </button>
             <button className="ghostButton" onClick={onStopSpeech} disabled={speechStatus === "idle"}>
-              Stop
+              {copy.stop}
             </button>
           </div>
         </div>
       ) : null}
 
       <button className="primaryButton" onClick={() => void onAnalyze()}>
-        Refresh analysis
+        {copy.refreshAnalysis}
       </button>
     </>
   );
@@ -592,6 +633,38 @@ const popupStyles = `
     display: flex;
     flex-direction: column;
     gap: 10px;
+  }
+
+  .compactStatsCard {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .statRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    padding-top: 8px;
+    border-top: 1px solid #e2ecff;
+  }
+
+  .statName {
+    margin: 0;
+    color: #315ea8;
+    font-size: 13px;
+    line-height: 1.4;
+    font-weight: 700;
+  }
+
+  .statNumber {
+    margin: 0;
+    color: #0f2c55;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+    flex: 0 0 auto;
   }
 
   .reasonItem {

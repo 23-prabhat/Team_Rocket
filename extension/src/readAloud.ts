@@ -18,7 +18,16 @@ export function speakText(text: string, language: SupportedLanguage, onEnd: () =
   stopSpeech();
 
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.lang = SPEECH_LANGUAGE_MAP[language] ?? "en-US";
+  const targetLang = SPEECH_LANGUAGE_MAP[language] ?? "en-US";
+  const availableVoices = window.speechSynthesis?.getVoices?.() ?? [];
+  const matchingVoice =
+    availableVoices.find((voice) => voice.lang.toLowerCase() === targetLang.toLowerCase()) ??
+    availableVoices.find((voice) => voice.lang.toLowerCase().startsWith(targetLang.split("-")[0].toLowerCase()));
+
+  utterance.lang = targetLang;
+  if (matchingVoice) {
+    utterance.voice = matchingVoice;
+  }
   utterance.rate = 0.95;
   utterance.onend = onEnd;
   utterance.onerror = onEnd;
