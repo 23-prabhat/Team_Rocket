@@ -20,10 +20,10 @@ export const translations = {
       drag: "Drag & drop your content file",
       dragActive: "Drop your file here",
       browse: "browse files",
-      hint: "Image, PDF or TXT, up to 10MB",
+      hint: "URL, PDF or TXT",
       analyze: "Analyze Content",
       analyzing: "Analyzing...",
-      errorType: "Only image, PDF, and TXT files are supported.",
+      errorType: "Only PDF and TXT files are supported for upload.",
       errorSize: "File must be under 10MB.",
     },
     howItWorks: {
@@ -218,7 +218,7 @@ export const translations = {
         },
         {
           title: "सरल भाषा सारांश",
-          desc: "जटिल कानूनी भाषा को सरल शब्दों में फिर से लिखा गया। ELI5 से विशेषज्ञ तक अपना स्तर चुनें।",
+          desc: "जटिल भाषा को आसान शब्दों में समझाया जाता है ताकि हर कोई जल्दी समझ सके।",
         },
         {
           title: "चिह्नित खंड",
@@ -379,7 +379,7 @@ export const translations = {
         },
         {
           title: "सोप्या भाषेचा सारांश",
-          desc: "गुंतागुंतीची कायदेशीर भाषा सोप्या शब्दांत पुन्हा लिहिली जाते। तुमचा वाचन स्तर निवडा।",
+          desc: "गुंतागुंतीचा मजकूर सोप्या शब्दांत समजावून दिला जातो, त्यामुळे पटकन अर्थ कळतो।",
         },
         {
           title: "चिन्हांकित कलम",

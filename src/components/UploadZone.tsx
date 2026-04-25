@@ -8,29 +8,20 @@ import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/language";
 import type { Analysis, AnalysisSession } from "@/lib/types";
 
-const ACCEPTED_TYPES = ["application/pdf", "text/plain", "image/png", "image/jpeg", "image/webp"];
-const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".webp"];
+const ACCEPTED_TYPES = ["application/pdf", "text/plain"];
+const ACCEPTED_EXTENSIONS = [".pdf", ".txt"];
 const MAX_SIZE_MB = 10;
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
 const STORAGE_KEY = "veritron_analysis";
-
-const READING_LEVELS = [
-  { value: "eli5", label: "ELI5" },
-  { value: "simple", label: "Simple" },
-  { value: "standard", label: "Standard" },
-  { value: "expert", label: "Expert" },
-] as const;
-
-type ReadingLevel = (typeof READING_LEVELS)[number]["value"];
 
 export function UploadZone() {
   const { t, lang } = useLanguage();
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
+  const [url, setUrl] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [readingLevel, setReadingLevel] = useState<ReadingLevel>("simple");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const validate = useCallback(
@@ -97,36 +88,60 @@ export function UploadZone() {
   }, []);
 
   const handleAnalyze = useCallback(async () => {
-    if (!file) return;
+    const trimmedUrl = url.trim();
+    if (!file && !trimmedUrl) {
+      setError("Add a URL or upload a file to continue.");
+      return;
+    }
+
     setIsUploading(true);
     setError(null);
     try {
-      // Step 1: upload + extract text
-      const formData = new FormData();
-      formData.append("file", file);
-      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error ?? "Upload failed.");
+      let textToAnalyze = "";
+      let requestBody: {
+        text?: string;
+        url?: string;
+        language: string;
+        readingLevel: "simple";
+        source: "web";
+      } = {
+        language: lang,
+        readingLevel: "simple",
+        source: "web",
+      };
 
-      // Step 2: analyze text
+      // If file is selected, upload it and extract text first.
+      if (file) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error ?? "Upload failed.");
+        textToAnalyze = uploadData.text;
+        requestBody = {
+          ...requestBody,
+          text: textToAnalyze,
+        };
+      } else {
+        textToAnalyze = trimmedUrl;
+        requestBody = {
+          ...requestBody,
+          url: trimmedUrl,
+        };
+      }
+
       const analyzeRes = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: uploadData.text,
-          language: lang,
-          readingLevel,
-          source: "web",
-        }),
+        body: JSON.stringify(requestBody),
       });
       const analysis: Analysis = await analyzeRes.json();
       if (!analyzeRes.ok) throw new Error((analysis as { error?: string }).error ?? "Analysis failed.");
 
-      // Step 3: store and navigate
       const session: AnalysisSession = {
         analysis,
-        text: uploadData.text,
-        readingLevel,
+        text: textToAnalyze,
+        readingLevel: "simple",
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
       router.push("/analyse");
@@ -134,7 +149,7 @@ export function UploadZone() {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
       setIsUploading(false);
     }
-  }, [file, lang, readingLevel, router]);
+  }, [file, lang, router, url]);
 
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
@@ -144,6 +159,22 @@ export function UploadZone() {
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4">
+      <div className="rounded-2xl border border-foreground/10 bg-background/80 p-2 shadow-[0_0_0_1px_rgba(255,255,255,0.02),0_10px_30px_rgba(0,0,0,0.22)] backdrop-blur-sm">
+        <div className="flex items-center gap-2">
+          <span className="px-3 text-sm font-semibold text-warm">$</span>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              if (error) setError(null);
+            }}
+            placeholder="https://news-site.com/article"
+            className="h-12 flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/70 outline-none"
+          />
+        </div>
+      </div>
+
       <div
         onDrop={handleDrop}
         onDragOver={handleDragOver}
@@ -180,7 +211,9 @@ export function UploadZone() {
             </div>
             <div>
               <p className="text-base font-semibold text-foreground">
-                {isDragging ? t.upload.dragActive : t.upload.drag}
+                {isDragging
+                  ? "Drop it here to analyze credibility"
+                  : "Paste a URL to check if news is fake or real"}
               </p>
               <p className="mt-1.5 text-sm text-muted-foreground">
                 {lang === "en" ? (
@@ -189,14 +222,14 @@ export function UploadZone() {
                     <span className="font-medium text-warm underline underline-offset-4 decoration-warm/40">
                       {t.upload.browse}
                     </span>{" "}
-                    — {t.upload.hint}
+                    — Paste a URL above, or upload PDF/TXT (image checks coming soon)
                   </>
                 ) : (
                   <>
                     <span className="font-medium text-warm underline underline-offset-4 decoration-warm/40">
                       {t.upload.browse}
                     </span>{" "}
-                    — {t.upload.hint}
+                    — Paste a URL above, or upload PDF/TXT (image checks coming soon)
                   </>
                 )}
               </p>
@@ -232,28 +265,8 @@ export function UploadZone() {
         <p className="text-sm text-destructive font-medium px-1">{error}</p>
       )}
 
-      {file && (
+      {(file || url.trim()) && (
         <div className="space-y-3">
-          {/* Reading level selector */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground shrink-0">Reading level:</span>
-            <div className="flex items-center gap-0.5 rounded-full border border-foreground/10 bg-foreground/[0.03] p-0.5">
-              {READING_LEVELS.map((lvl) => (
-                <button
-                  key={lvl.value}
-                  onClick={() => setReadingLevel(lvl.value)}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-all duration-200 cursor-pointer ${
-                    readingLevel === lvl.value
-                      ? "bg-warm text-warm-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {lvl.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
           <Button
             onClick={handleAnalyze}
             disabled={isUploading}
