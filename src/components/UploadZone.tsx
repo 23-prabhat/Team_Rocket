@@ -8,10 +8,18 @@ import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/language";
 import type { Analysis, AnalysisSession } from "@/lib/types";
 
-const ACCEPTED_TYPES = ["application/pdf", "text/plain"];
-const ACCEPTED_EXTENSIONS = [".pdf", ".txt"];
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "text/plain",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+];
+const ACCEPTED_EXTENSIONS = [".pdf", ".txt", ".png", ".jpg", ".jpeg", ".webp"];
 const MAX_SIZE_MB = 10;
 const MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024;
+const MAX_IMAGE_SIZE_MB = 4;
+const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 const STORAGE_KEY = "veritron_analysis";
 
 export function UploadZone() {
@@ -34,6 +42,10 @@ export function UploadZone() {
       }
       if (f.size > MAX_SIZE_BYTES) {
         return t.upload.errorSize;
+      }
+      const isImage = f.type.startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(f.name);
+      if (isImage && f.size > MAX_IMAGE_SIZE_BYTES) {
+        return `Image too large. Keep image uploads under ${MAX_IMAGE_SIZE_MB}MB.`;
       }
       return null;
     },
@@ -222,14 +234,14 @@ export function UploadZone() {
                     <span className="font-medium text-warm underline underline-offset-4 decoration-warm/40">
                       {t.upload.browse}
                     </span>{" "}
-                    — Paste a URL above, or upload PDF/TXT (image checks coming soon)
+                    — Paste a URL above, or upload PDF/TXT/Images for verification
                   </>
                 ) : (
                   <>
                     <span className="font-medium text-warm underline underline-offset-4 decoration-warm/40">
                       {t.upload.browse}
                     </span>{" "}
-                    — Paste a URL above, or upload PDF/TXT (image checks coming soon)
+                    — Paste a URL above, or upload PDF/TXT/Images for verification
                   </>
                 )}
               </p>
