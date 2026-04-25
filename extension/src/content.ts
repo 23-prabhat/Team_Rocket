@@ -3,6 +3,10 @@ import { pauseSpeech, resumeSpeech, speakText, stopSpeech } from "./readAloud";
 import {
   DEFAULT_LANGUAGE,
   getCredibilityLabel,
+  getTruthLikelihood,
+  getUiCopy,
+  getVerdictText,
+  getWrongnessPercentage,
   LANGUAGE_OPTIONS,
   type SupportedLanguage,
 } from "./shared";
@@ -132,7 +136,7 @@ function handleTriggerAnalysis(targetLanguage?: SupportedLanguage) {
 
   const text = extractRelevantText();
   if (!text) {
-    const message = "No article-like content with enough text was found on this page.";
+    const message = getUiCopy(selectedLanguage).pageNotFound;
     currentPageState = { status: "error", message, targetLanguage: selectedLanguage };
     sidebar.render(currentPageState);
     void chrome.runtime.sendMessage({ type: "ANALYSIS_ERROR", message } satisfies RuntimeMessage);
@@ -273,6 +277,8 @@ function renderSidebar(
   controller: SidebarController,
 ) {
   container.replaceChildren();
+  const activeLanguage = state.status === "idle" ? selectedLanguage : state.targetLanguage;
+  const copy = getUiCopy(activeLanguage);
 
   const panel = document.createElement("aside");
   panel.className = "panel";
@@ -283,8 +289,8 @@ function renderSidebar(
   const titleWrap = document.createElement("div");
   titleWrap.innerHTML = `
     <p class="eyebrow">Veritron</p>
-    <h2 class="title">Misinformation Scan</h2>
-    <p class="subtitle">Regional-language fake news analysis for the current page.</p>
+    <h2 class="title">${escapeHtml(copy.appTitle)}</h2>
+    <p class="subtitle">${escapeHtml(copy.appSubtitle)}</p>
   `;
 
   const closeButton = document.createElement("button");
@@ -305,11 +311,11 @@ function renderSidebar(
 
   const controlsTitle = document.createElement("p");
   controlsTitle.className = "sectionLabel";
-  controlsTitle.textContent = "Output language";
+  controlsTitle.textContent = copy.outputLanguage;
 
   const controlsHint = document.createElement("p");
   controlsHint.className = "helperText";
-  controlsHint.textContent = "Switch the explanation language and rerun the scan.";
+  controlsHint.textContent = copy.outputLanguageHint;
 
   const languageSelect = document.createElement("select");
   languageSelect.className = "languageSelect";
@@ -337,7 +343,7 @@ function renderSidebar(
     loadingCard.className = "loadingCard";
     loadingCard.innerHTML = `
       <div class="spinner" aria-hidden="true"></div>
-      <p class="loadingText">Checking this page for misinformation signals...</p>
+      <p class="loadingText">${escapeHtml(copy.loadingSignals)}</p>
     `;
     content.appendChild(loadingCard);
   }
@@ -346,7 +352,7 @@ function renderSidebar(
     const errorCard = document.createElement("div");
     errorCard.className = "errorCard";
     errorCard.innerHTML = `
-      <p class="errorTitle">Analysis failed</p>
+      <p class="errorTitle">${escapeHtml(copy.analysisError)}</p>
       <p class="errorMessage">${escapeHtml(state.message)}</p>
     `;
     content.appendChild(errorCard);
@@ -357,7 +363,7 @@ function renderSidebar(
     riskCard.className = "riskCard";
     riskCard.innerHTML = `
       <div>
-        <p class="sectionLabel">Fake news percentage</p>
+        <p class="sectionLabel">${escapeHtml(copy.fakeNewsPercentage)}</p>
         <p class="score">${state.data.riskScore}<span>%</span></p>
         <p class="helperText">${escapeHtml(getCredibilityLabel(state.data.riskScore))}</p>
       </div>
@@ -365,12 +371,39 @@ function renderSidebar(
     `;
     content.appendChild(riskCard);
 
+    const percentageCard = document.createElement("section");
+    percentageCard.className = "sectionCard";
+    percentageCard.innerHTML = `
+      <p class="sectionLabel">${escapeHtml(copy.verdict)}</p>
+      <div class="statRow">
+        <span class="statName">${escapeHtml(copy.falseRiskPercentage)}</span>
+        <span class="statNumber">${state.data.riskScore}%</span>
+      </div>
+      <div class="statRow">
+        <span class="statName">${escapeHtml(copy.truthLikelihoodPercentage)}</span>
+        <span class="statNumber">${getTruthLikelihood(state.data.riskScore)}%</span>
+      </div>
+      <div class="statRow">
+        <span class="statName">${escapeHtml(copy.wrongnessPercentage)}</span>
+        <span class="statNumber">${getWrongnessPercentage(state.data.riskScore)}%</span>
+      </div>
+    `;
+    content.appendChild(percentageCard);
+
+    const verdictCard = document.createElement("section");
+    verdictCard.className = "sectionCard";
+    verdictCard.innerHTML = `
+      <p class="sectionLabel">${escapeHtml(copy.explanation)}</p>
+      <p class="summaryText">${escapeHtml(getVerdictText(state.data.riskScore, state.targetLanguage))}</p>
+    `;
+    content.appendChild(verdictCard);
+
     const summaryCard = document.createElement("section");
     summaryCard.className = "sectionCard";
     summaryCard.innerHTML = `
-      <p class="sectionLabel">Why it was flagged</p>
+      <p class="sectionLabel">${escapeHtml(copy.topReasons)}</p>
       <p class="summaryText">${escapeHtml(shortenText(state.data.summary, 360))}</p>
-      <p class="helperText">Output language: ${escapeHtml(getLanguageLabel(state.targetLanguage))}</p>
+      <p class="helperText">${escapeHtml(copy.output)}: ${escapeHtml(getLanguageLabel(state.targetLanguage))}</p>
     `;
     content.appendChild(summaryCard);
 
@@ -379,7 +412,7 @@ function renderSidebar(
 
     const reasonsTitle = document.createElement("p");
     reasonsTitle.className = "sectionLabel";
-    reasonsTitle.textContent = "Key reasons";
+    reasonsTitle.textContent = copy.topReasons;
     reasonsCard.appendChild(reasonsTitle);
 
     const reasonsList = document.createElement("div");
@@ -389,7 +422,7 @@ function renderSidebar(
     if (topReasons.length === 0) {
       const emptyState = document.createElement("p");
       emptyState.className = "emptyText";
-      emptyState.textContent = "No detailed reasons were returned for this page.";
+      emptyState.textContent = copy.noReasons;
       reasonsList.appendChild(emptyState);
     } else {
       for (const clause of topReasons) {
@@ -415,7 +448,7 @@ function renderSidebar(
 
     const audioTitle = document.createElement("p");
     audioTitle.className = "sectionLabel";
-    audioTitle.textContent = "Read aloud";
+    audioTitle.textContent = copy.readAloud;
 
     const audioActions = document.createElement("div");
     audioActions.className = "actionRow";
@@ -424,7 +457,7 @@ function renderSidebar(
     audioButton.type = "button";
     audioButton.className = "secondaryButton";
     audioButton.textContent =
-      speechStatus === "playing" ? "Pause audio" : speechStatus === "paused" ? "Resume audio" : "Play audio";
+      speechStatus === "playing" ? copy.pauseAudio : speechStatus === "paused" ? copy.resumeAudio : copy.playAudio;
     audioButton.addEventListener("click", () => {
       const playbackText = [state.data.summary, ...topReasons.map((item) => item.explanation)].join(". ");
 
@@ -448,7 +481,7 @@ function renderSidebar(
     const stopButton = document.createElement("button");
     stopButton.type = "button";
     stopButton.className = "ghostButton";
-    stopButton.textContent = "Stop";
+    stopButton.textContent = copy.stop;
     stopButton.disabled = speechStatus === "idle";
     stopButton.addEventListener("click", () => {
       stopPlayback();
@@ -463,7 +496,7 @@ function renderSidebar(
   const analyzeButton = document.createElement("button");
   analyzeButton.type = "button";
   analyzeButton.className = "primaryButton";
-  analyzeButton.textContent = "Scan page again";
+  analyzeButton.textContent = copy.scanPageAgain;
   analyzeButton.addEventListener("click", () => handleTriggerAnalysis(selectedLanguage));
   content.appendChild(analyzeButton);
 
@@ -691,6 +724,32 @@ function getSidebarStyles(): string {
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+
+    .statRow {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 16px;
+      padding-top: 8px;
+      margin-top: 8px;
+      border-top: 1px solid #e2ecff;
+    }
+
+    .statName {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.4;
+      font-weight: 700;
+      color: #315ea8;
+    }
+
+    .statNumber {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.1;
+      font-weight: 800;
+      color: #0f2c55;
     }
 
     .reasonItem {

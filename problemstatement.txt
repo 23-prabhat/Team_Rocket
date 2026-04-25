@@ -1,0 +1,9 @@
+3. Misinformation Detection in Regional Languages 
+Problem Statement: 
+Design a system that detects fake or misleading content in regional Indian languages and 
+explains why it is flagged. 
+Description: 
+Fake news spreads rapidly, especially in regional languages where detection tools are limited. 
+The system should analyze input content, identify whether it is misleading or false, and 
+provide a simple explanation for its decision. The focus should be on handling at least one 
+regional language effectively and making the output understandable for users.
