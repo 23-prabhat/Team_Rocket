@@ -5,6 +5,12 @@ import { searchClaimsWithTavily, type ClaimSearchEvidence } from './tavily'
 import type { Analysis, AnalyzeRequest } from './types'
 
 const MAX_TEXT_CHARS = 4_000
+const DEVANAGARI_RE = /[\u0900-\u097F]/
+const LATIN_RE = /[A-Za-z]/
+const TARGET_LANGUAGE_LABELS: Record<string, string> = {
+  hi: 'Hindi (Devanagari)',
+  mr: 'Marathi (Devanagari)',
+}
 
 export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
   const text = (req.text ?? '').slice(0, MAX_TEXT_CHARS)
@@ -86,7 +92,7 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
     ...flattenedMatches,
   ])
 
-  return {
+  const baseAnalysis: Analysis = {
     summary: typeof parsed.summary === 'string' ? parsed.summary : '',
     riskScore,
     riskLevel: normalizeRiskLevel(parsed.riskLevel) ?? scoreToLevel(riskScore),
@@ -104,6 +110,98 @@ export async function analyze(req: AnalyzeRequest): Promise<Analysis> {
     language,
     auditId: uuidv4(),
     createdAt: new Date().toISOString(),
+  }
+
+  return repairLanguageIfNeeded(baseAnalysis, language)
+}
+
+async function repairLanguageIfNeeded(analysis: Analysis, language: string): Promise<Analysis> {
+  const target = TARGET_LANGUAGE_LABELS[language]
+  if (!target) return analysis
+  if (!looksMostlyLatinOutput(analysis)) return analysis
+
+  const textPayload = {
+    summary: analysis.summary,
+    keyObligations: analysis.keyObligations,
+    hiddenClauses: analysis.hiddenClauses,
+    evidence: analysis.evidence,
+    timeline: analysis.timeline,
+    corroboration: analysis.corroboration,
+    quiz: analysis.quiz,
+  }
+
+  const prompt = `Translate this JSON object to ${target}.
+Rules:
+- Preserve JSON keys and structure exactly.
+- Translate only human-readable strings.
+- Keep URLs, dates, and numeric values unchanged.
+- Keep severity/risk enums in English: low, medium, high, critical, supports, mixed, contradicts, insufficient.
+- Return ONLY raw JSON.
+
+JSON:
+${JSON.stringify(textPayload)}`
+
+  try {
+    const raw = await generateContent(prompt, {
+      model: process.env.GROQ_TRANSLATE_MODEL ?? process.env.GROQ_CLAIMS_MODEL ?? 'llama-3.1-8b-instant',
+      temperature: 0,
+      maxTokens: 1800,
+      timeoutMs: Math.max(8_000, Number(process.env.GROQ_TRANSLATE_TIMEOUT_MS ?? 20_000)),
+    })
+
+    const translated = parseJsonObject(raw)
+    if (!translated || typeof translated !== 'object') return analysis
+
+    const t = translated as Record<string, unknown>
+    const translatedKeyObligations = normalizeStringArray(t.keyObligations, 3)
+    const translatedHiddenClauses = normalizeHiddenClauses(t.hiddenClauses)
+    const translatedEvidence = normalizeEvidence(t.evidence)
+    const translatedQuiz = normalizeQuiz(t.quiz)
+    return {
+      ...analysis,
+      summary: typeof t.summary === 'string' ? t.summary : analysis.summary,
+      keyObligations: translatedKeyObligations.length ? translatedKeyObligations : analysis.keyObligations,
+      hiddenClauses: translatedHiddenClauses.length ? translatedHiddenClauses : analysis.hiddenClauses,
+      evidence: translatedEvidence.length ? translatedEvidence : analysis.evidence,
+      timeline: t.timeline !== undefined ? normalizeTimeline(t.timeline) : analysis.timeline,
+      corroboration:
+        t.corroboration !== undefined
+          ? normalizeCorroboration(t.corroboration, analysis.corroboration?.matches)
+          : analysis.corroboration,
+      quiz: translatedQuiz.length ? translatedQuiz : analysis.quiz,
+    }
+  } catch {
+    return analysis
+  }
+}
+
+function looksMostlyLatinOutput(analysis: Analysis): boolean {
+  const sample = [
+    analysis.summary,
+    ...analysis.keyObligations,
+    ...analysis.hiddenClauses.flatMap((item) => [item.text, item.explanation]),
+    ...analysis.evidence.flatMap((item) => [item.claim, item.finding]),
+    ...(analysis.timeline?.notes ?? []),
+    analysis.corroboration?.summary ?? '',
+  ]
+    .join(' ')
+    .slice(0, 2000)
+
+  if (!sample) return false
+
+  const devanagariChars = (sample.match(new RegExp(DEVANAGARI_RE.source, 'g')) ?? []).length
+  const latinChars = (sample.match(new RegExp(LATIN_RE.source, 'g')) ?? []).length
+  return latinChars > 80 && devanagariChars < 20
+}
+
+function parseJsonObject(raw: string): Record<string, unknown> | null {
+  const start = raw.indexOf('{')
+  const end = raw.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) return null
+  try {
+    return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>
+  } catch {
+    return null
   }
 }
 
